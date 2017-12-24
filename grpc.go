@@ -7,18 +7,28 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-// NewGRPCCredentials returns a curvetls implementation of gRPC's credentials.TransportCredentials
-func NewGRPCCredentials(pubKey Pubkey, privKey Privkey) GRPCCredentials {
+// NewGRPCServerCredentials returns a curvetls implementation of gRPC's credentials.TransportCredentials
+func NewGRPCServerCredentials(pubKey Pubkey, privKey Privkey) GRPCCredentials {
 	return GRPCCredentials{
 		Pub:  pubKey,
 		Priv: privKey,
 	}
 }
 
+func NewGRPCClientCredentials(serverPubKey, pubKey Pubkey, privKey Privkey) credentials.TransportCredentials {
+	return &GRPCCredentials{
+		Pub:        serverPubKey,
+		ClientPub:  pubKey,
+		ClientPriv: privKey,
+	}
+}
+
 // GRPCCredentials implements credentials.TransportCredentials
 type GRPCCredentials struct {
-	Pub  Pubkey
-	Priv Privkey
+	Pub        Pubkey
+	Priv       Privkey
+	ClientPub  Pubkey
+	ClientPriv Privkey
 }
 
 type authInfo struct{}
@@ -96,11 +106,107 @@ func (g *GRPCCredentials) ServerHandshake(rawConn net.Conn) (net.Conn, credentia
 	return encrypted, authInfo{}, nil
 }
 
+// ClientHandshake ...
 func (g *GRPCCredentials) ClientHandshake(ctx context.Context, s string, rawConn net.Conn) (net.Conn, credentials.AuthInfo, error) {
 
-	return nil, nil, nil
+	longNonce, err := NewLongNonce()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	myNonce := newShortNonce()
+	serverNonce := newShortNonce()
+
+	ephClientPrivkey, ephClientPubkey, err := genEphemeralClientKeyPair()
+	if err != nil {
+		return nil, nil, closeAndBail(rawConn, newInternalError("cannot generate ephemeral keypair", err))
+	}
+
+	var mygreeting, theirgreeting, expectedgreeting greeting
+	mygreeting.asClient()
+	expectedgreeting.asServer()
+
+	if err := wrc(rawConn, mygreeting[:], theirgreeting[:]); err != nil {
+		return nil, nil, closeAndBail(rawConn, err)
+	}
+
+	if theirgreeting != expectedgreeting {
+		return nil, nil, closeAndBail(rawConn, newProtocolError("malformed greeting"))
+	}
+
+	var helloCmd helloCommand
+	if err := helloCmd.build(myNonce, ephClientPrivkey, ephClientPubkey, permanentServerPubkey(g.Pub)); err != nil {
+		return nil, nil, iE(rawConn, "HELLO", err)
+	}
+
+	if err := writeFrame(rawConn, &helloCmd); err != nil {
+		return nil, nil, closeAndBail(rawConn, err)
+	}
+
+	var welcomeCmd welcomeCommand
+	if err := readFrame(rawConn, &welcomeCmd); err != nil {
+		return nil, nil, closeAndBail(rawConn, err)
+	}
+
+	ephServerPubkey, sCookie, err := welcomeCmd.validate(ephClientPrivkey, permanentServerPubkey(g.Pub))
+	if err != nil {
+		return nil, nil, pE(rawConn, "WELCOME", err)
+	}
+
+	var initiateCmd initiateCommand
+	if err := initiateCmd.build(myNonce,
+		longNonce,
+		sCookie,
+		permanentClientPrivkey(g.ClientPriv),
+		permanentClientPubkey(g.ClientPub),
+		permanentServerPubkey(g.Pub),
+		ephServerPubkey,
+		ephClientPrivkey,
+		ephClientPubkey); err != nil {
+		return nil, nil, iE(rawConn, "INITIATE", err)
+	}
+
+	if err := writeFrame(rawConn, &initiateCmd); err != nil {
+		return nil, nil, closeAndBail(rawConn, err)
+	}
+
+	var genericCmd genericCommand
+	if err := readFrame(rawConn, &genericCmd); err != nil {
+		return nil, nil, closeAndBail(rawConn, err)
+	}
+
+	specificCmd, err := genericCmd.convert()
+	if err != nil {
+		return nil, nil, pE(rawConn, "READY or ERROR", err)
+	}
+
+	sharedKey := precomputeKey(Privkey(ephClientPrivkey), Pubkey(ephServerPubkey))
+
+	switch cmd := specificCmd.(type) {
+	case *readyCommand:
+		if err := cmd.validate(serverNonce, &sharedKey); err != nil {
+			return nil, nil, pE(rawConn, "READY", err)
+		}
+	case *errorCommand:
+		reason, err := cmd.validate()
+		if err != nil {
+			return nil, nil, pE(rawConn, "ERROR", err)
+		}
+		return nil, nil, closeAndBail(rawConn, newAuthenticationError(reason))
+	default:
+		return nil, nil, pE(rawConn, "unknown command", err)
+	}
+
+	return &EncryptedConn{
+		Conn:       rawConn,
+		myNonce:    myNonce,
+		theirNonce: serverNonce,
+		sharedKey:  sharedKey,
+		isServer:   false,
+	}, nil, nil
 }
 
+// Info ...
 func (g *GRPCCredentials) Info() credentials.ProtocolInfo {
 
 	return credentials.ProtocolInfo{}
@@ -108,10 +214,16 @@ func (g *GRPCCredentials) Info() credentials.ProtocolInfo {
 
 func (g *GRPCCredentials) Clone() credentials.TransportCredentials {
 
-	return nil
+	return &GRPCCredentials{
+		Pub:        g.Pub,
+		Priv:       g.Priv,
+		ClientPub:  g.ClientPub,
+		ClientPriv: g.ClientPriv,
+	}
 }
 
 func (g *GRPCCredentials) OverrideServerName(string) error {
+	// TODO
 	return nil
 }
 
