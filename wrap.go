@@ -420,7 +420,7 @@ func (w *EncryptedConn) Read(b []byte) (int, error) {
 	if w.recvFrame == nil {
 		frame, err := w.ReadFrame()
 		if err != nil {
-			if err == io.EOF {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				return 0, err
 			}
 			return 0, nil
