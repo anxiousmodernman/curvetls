@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/Rudd-O/curvetls"
 	"log"
 	"net"
 	"os"
+
+	"github.com/Rudd-O/curvetls"
 )
 
 func main() {

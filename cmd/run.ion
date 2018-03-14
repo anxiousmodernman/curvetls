@@ -1,0 +1,33 @@
+#!/usr/bin/env ion
+
+fn run_server addr srv_priv srv_pub client_pub
+  cd curvetls-pingpong-server 
+  go run main.go $addr $srv_priv $srv_pub $client_pub
+  cd ..
+end
+
+fn run_client addr client_priv client_pub srv_pub
+  cd curvetls-pingpong-client 
+  go run main.go $addr $client_priv $client_pub $srv_pub
+  cd ..
+end
+
+let c_private_key = "pO7GcHbjEhArw7t0zLbAc6m7tnawglRXOM7DimDKlvQI="
+let c_public_key =  "PQ5s3lkv37Q88ppkf66yUCpQ938C7fpKwpsuyi+XLNG0="
+
+let s_private_key = "pn3z7V2X/9lflCdY5TpaZERipY/f4y3ejKqNxISlt4+Q="
+let s_public_key = "P1skTYK34+/Mlc0UKX3hz3fz6/NhDe2UMq0ldmW4hsy4="
+
+let addr = "127.0.0.1:1337"
+
+match @args[1]
+  case "server" 
+    echo "ready to become a server"
+    run_server $addr $s_private_key $s_public_key $c_public_key
+  case "client" 
+    echo "ready to become a client"
+    run_client $addr $c_private_key $c_public_key $s_public_key
+  case _
+    echo "what r u doin"
+end
+

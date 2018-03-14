@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/Rudd-O/curvetls"
 	"log"
 	"net"
 	"os"
+
+	"github.com/Rudd-O/curvetls"
 )
 
 func main() {
@@ -12,7 +13,7 @@ func main() {
 		log.Fatalf("usage: curvetls-client <IP:port> <client privkey> <client pubkey> <server pubkey>")
 	}
 
-	connect := os.Args[1]
+	addr := os.Args[1]
 	clientPrivkey, err := curvetls.PrivkeyFromString(os.Args[2])
 	if err != nil {
 		log.Fatalf("Client: failed to parse client private key: %s", err)
@@ -26,16 +27,16 @@ func main() {
 		log.Fatalf("Client: failed to parse server public key: %s", err)
 	}
 
-	socket, err := net.Dial("tcp4", connect)
+	socket, err := net.Dial("tcp4", addr)
 	if err != nil {
 		log.Fatalf("Client: failed to connect to socket: %s", err)
 	}
 
-	long_nonce, err := curvetls.NewLongNonce()
+	nonce, err := curvetls.NewLongNonce()
 	if err != nil {
 		log.Fatalf("Failed to generate nonce: %s", err)
 	}
-	ssocket, err := curvetls.WrapClient(socket, clientPrivkey, clientPubkey, serverPubkey, long_nonce)
+	ssocket, err := curvetls.WrapClient(socket, clientPrivkey, clientPubkey, serverPubkey, nonce)
 	if err != nil {
 		if curvetls.IsAuthenticationError(err) {
 			log.Fatalf("Client: server says unauthorized: %s", err)
