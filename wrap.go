@@ -3,6 +3,7 @@ package curvetls
 import (
 	"crypto/rand"
 	"fmt"
+	"io"
 	"net"
 )
 
@@ -419,6 +420,9 @@ func (w *EncryptedConn) Read(b []byte) (int, error) {
 	if w.recvFrame == nil {
 		frame, err := w.ReadFrame()
 		if err != nil {
+			if err == io.EOF {
+				return 0, err
+			}
 			return 0, nil
 		}
 		w.recvFrame = frame
