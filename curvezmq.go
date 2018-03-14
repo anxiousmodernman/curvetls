@@ -6,10 +6,11 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-        "io"
+	"io"
+	"net"
+
 	"golang.org/x/crypto/nacl/box"
 	"golang.org/x/crypto/nacl/secretbox"
-	"net"
 )
 
 var greetingTemplate = [64]byte{
@@ -300,13 +301,16 @@ func readFrame(conn net.Conn, dest frame) error {
 		return err
 	}
 	var uint64len uint64
+	// what are the frame types?
 	if ftype[0] == '\004' {
+		// one byte
 		var length [1]uint8
 		if err := rc(conn, length[:]); err != nil {
 			return err
 		}
 		uint64len = uint64(length[0])
 	} else if ftype[0] == '\006' {
+		// eight bytes
 		var length [8]byte
 		if err := rc(conn, length[:]); err != nil {
 			return err
@@ -317,6 +321,7 @@ func readFrame(conn net.Conn, dest frame) error {
 	}
 	buf := dest.getBuffer()
 	if uint64(len(buf)) != uint64len {
+		// does realloc happen often?
 		canRealloc, err := dest.realloc(uint64len)
 		// Replicated in genericFrame.convert().  FIXME dedup.
 		if !canRealloc {
